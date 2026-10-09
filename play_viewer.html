@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<!--
+  NFL Play Viewer (Big Data Bowl tracking data)
+
+  Usage:
+    1. Open this file in Chrome, Edge, Firefox or Safari.
+    2. Click "Open data folder" and select the project's `data/` folder (or the project root).
+       Files are read locally in your browser; nothing is uploaded.
+  Alternative: run `python3 -m http.server` in the project root and open
+  http://localhost:8000/play_viewer.html — the data then loads automatically.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFL Play Viewer · Big Data Bowl</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171d24; --panel-2: #1e252e; --border: #2a333d;
+    --text: #e6edf3; --muted: #9aa7b4; --accent: #4c9aff;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  button, select, input { font: inherit; color: inherit; }
+  button, select { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  #status { color: var(--muted); }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  #welcome { max-width: 680px; margin: 60px auto; padding: 0 20px; color: var(--muted); }
+  #welcome h2 { color: var(--text); }
+  #welcome code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  #game-bar { margin: 12px 20px 0; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #game-summary { display: flex; gap: 20px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+  #game-summary strong { color: var(--text); }
+
+  #strip { display: flex; align-items: flex-end; gap: 1px; height: 72px; overflow-x: auto; padding-top: 14px; margin-top: 10px; position: relative; }
+  #strip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 18px; height: 1px; background: var(--border); pointer-events: none; }
+  .slot { flex: 1 0 6px; max-width: 18px; height: 56px; position: relative; padding: 0; border: none; border-radius: 2px; background: transparent; }
+  .slot:hover { background: rgba(255,255,255,0.07); }
+  .slot.active { background: rgba(76,154,255,0.28); outline: 1px solid var(--accent); }
+  .bar { position: absolute; left: 1px; right: 1px; border-radius: 1px; }
+  .q-sep { flex: 0 0 auto; align-self: stretch; font-size: 10px; color: var(--muted); border-left: 1px solid var(--border); padding: 0 3px; }
+  .strip-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  #layout { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 12px; padding: 12px 20px 20px; align-items: start; }
+  @media (max-width: 1200px) { #layout { grid-template-columns: 1fr; } }
+
+  #list-panel { max-height: calc(100vh - 220px); overflow: auto; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+  #play-count { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  #play-list { list-style: none; margin: 0; padding: 0; }
+  .play-item { display: block; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 8px; margin-bottom: 4px; }
+  .play-item.active { border-color: var(--accent); background: rgba(76,154,255,0.12); }
+  .pi-top { font-size: 13px; margin-bottom: 2px; }
+  .pi-desc { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #0b0f14; margin-right: 6px; }
+
+  #prob-panel { margin-top: 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  #prob-readout { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+  #prob-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #prob-delta { font-weight: 600; font-variant-numeric: tabular-nums; }
+  #prob-note { color: var(--muted); font-size: 12px; }
+  .up { color: #2fbf71; } .down { color: #f04d4d; } .flat { color: var(--muted); }
+  #prob-chart { display: block; width: 100%; cursor: pointer; }
+
+  #canvas-wrap { position: relative; width: 100%; }
+  #field { display: block; border-radius: 6px; }
+  #tooltip { position: absolute; pointer-events: none; background: rgba(10,14,20,0.95); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 12px; width: 260px; z-index: 2; }
+  .good { color: #7ee2a8; } .bad { color: #ffb020; }
+
+  .controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .slider-wrap { flex: 1 1 220px; position: relative; padding-bottom: 8px; }
+  #frame-slider { width: 100%; }
+  #ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 6px; }
+  .tick { position: absolute; width: 2px; height: 6px; background: var(--accent); transform: translateX(-1px); }
+  #frame-label { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 110px; }
+  #events { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+  .options { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; color: var(--muted); align-items: center; }
+  .options label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  #legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -2px; margin-right: 5px; }
+  .sw.line { border-radius: 0; height: 3px; width: 16px; vertical-align: 3px; }
+  .sw.ring { background: transparent; border: 2px solid #fff; }
+  .sw.ring.allowed { border: 2px dashed #ffb020; }
+  .hint { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+
+  #info-panel h2 { font-size: 15px; margin: 0 0 8px; }
+  #info-panel p { margin: 0 0 10px; }
+  #info-panel dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; margin: 0; font-size: 13px; }
+  #info-panel dt { color: var(--muted); }
+  #info-panel dd { margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 NFL Play Viewer</h1>
+  <button id="open-folder" class="primary">Open data folder</button>
+  <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+  <button id="open-prob" title="first_down_model/outputs/live_probabilities.csv">Load live probabilities</button>
+  <input type="file" id="prob-input" accept=".csv,text/csv" hidden>
+  <span id="status" role="status" aria-live="polite">Select the <code>data</code> folder to begin.</span>
+</header>
+
+<section id="welcome">
+  <h2>Watch every pass play, frame by frame</h2>
+  <p>Click <strong>Open data folder</strong> and choose this project's <code>data</code> folder (the one containing
+    <code>games.csv</code> and <code>tracking/</code>). Your browser may ask to confirm the "upload"; the files stay on your machine.</p>
+  <p>Then pick a game, click a play, and press ▶. Red pass rushers try to reach the gold quarterback; blue blockers try to stop them.</p>
+</section>
+
+<div id="app" hidden>
+  <section id="game-bar" class="panel" aria-label="Game overview">
+    <div class="row">
+      <label for="game-select"><strong>Game</strong></label>
+      <select id="game-select"></select>
+      <div id="game-summary"></div>
+    </div>
+    <div id="strip" aria-label="Plays in this game in order. Bar height is yards gained, color is result."></div>
+    <div class="strip-legend" id="strip-legend"></div>
+  </section>
+
+  <main id="layout">
+    <aside id="list-panel" class="panel" aria-label="Play list">
+      <div class="filters">
+        <label>Offense <select id="team-filter"></select></label>
+        <label>Result
+          <select id="result-filter">
+            <option value="all">All results</option>
+            <option value="C">Complete</option>
+            <option value="I">Incomplete</option>
+            <option value="S">Sack</option>
+            <option value="IN">Interception</option>
+            <option value="R">Scramble</option>
+          </select>
+        </label>
+      </div>
+      <div id="play-count"></div>
+      <ol id="play-list"></ol>
+    </aside>
+
+    <section id="viewer" class="panel" aria-label="Play animation">
+      <div id="canvas-wrap">
+        <canvas id="field" role="img" aria-label="Field view of the selected play. Hover a player for details."></canvas>
+        <div id="tooltip" role="tooltip" hidden></div>
+      </div>
+      <div id="prob-panel">
+        <div id="prob-readout">
+          <span>First-down chance</span>
+          <span id="prob-value">—</span>
+          <span id="prob-delta"></span>
+          <span id="prob-note"></span>
+        </div>
+        <canvas id="prob-chart" role="img" aria-label="Live first-down probability over the play. Click to jump to a moment."></canvas>
+      </div>
+      <div class="controls">
+        <button id="prev-play" aria-label="Previous play" title="Previous play (↑)">⏮</button>
+        <button id="play-btn" aria-label="Play" title="Play / pause (space)">▶</button>
+        <button id="next-play" aria-label="Next play" title="Next play (↓)">⏭</button>
+        <div class="slider-wrap">
+          <input type="range" id="frame-slider" min="0" max="0" value="0" aria-label="Frame">
+          <div id="ticks" aria-hidden="true"></div>
+        </div>
+        <span id="frame-label"></span>
+        <label>Speed
+          <select id="speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+      </div>
+      <div id="events" aria-label="Tagged events; click to jump"></div>
+      <div class="options">
+        <label><input type="checkbox" id="opt-normalize" checked> Offense always moves →</label>
+        <label><input type="checkbox" id="opt-blocks" checked> Blocking assignments</label>
+        <label><input type="checkbox" id="opt-vel" checked> Motion arrows</label>
+        <label><input type="checkbox" id="opt-autonext"> Auto-play next play</label>
+        <label>Color by
+          <select id="color-mode">
+            <option value="role">PFF role</option>
+            <option value="team">Offense / defense</option>
+          </select>
+        </label>
+      </div>
+      <div id="legend"></div>
+      <p class="hint">Keys: space = play/pause, ←/→ = step a frame, ↑/↓ = previous/next play.
+        Arrows show where each player is moving (longer = faster); the white tick on each dot shows which way he's facing.</p>
+    </section>
+
+    <aside id="info-panel" class="panel" aria-label="Play details" aria-live="polite"></aside>
+  </main>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Constants ----------
+  const FIELD_W = 120, FIELD_H = 53.3;
+  const HASH_Y = [23.58, 29.75];
+  const ROLE_COLORS = { 'Pass': '#f5c518', 'Pass Block': '#2f81f7', 'Pass Route': '#7fd4ff', 'Pass Rush': '#f04d4d', 'Coverage': '#c07cf5' };
+  const ROLE_LABELS = { 'Pass': 'Quarterback (passer)', 'Pass Block': 'Pass blocker', 'Pass Route': 'Route runner', 'Pass Rush': 'Pass rusher', 'Coverage': 'Coverage defender' };
+  const LIGHT_ROLES = new Set(['Pass', 'Pass Route']);
+  const TEAM_COLORS = { offense: '#2f81f7', defense: '#f04d4d' };
+  const UNKNOWN_COLOR = '#9aa7b4';
+  const RESULT_INFO = {
+    C: ['Complete', '#2fbf71'], I: ['Incomplete', '#8b949e'], S: ['Sack', '#f04d4d'],
+    IN: ['Interception', '#b26cf0'], R: ['Scramble', '#f0a33c'],
+  };
+  const EVENT_LABELS = {
+    line_set: 'Offense set', man_in_motion: 'Player in motion', shift: 'Shift',
+    ball_snap: 'Snap', autoevent_ballsnap: 'Snap (auto)', play_action: 'Play-action fake',
+    pass_forward: 'Pass thrown', autoevent_passforward: 'Pass thrown (auto)', pass_arrived: 'Pass arrives',
+    pass_tipped: 'Pass tipped', pass_outcome_caught: 'Caught', pass_outcome_incomplete: 'Incomplete',
+    qb_sack: 'QB sacked', qb_strip_sack: 'Strip sack', fumble: 'Fumble',
+    fumble_offense_recovered: 'Offense recovers', fumble_defense_recovered: 'Defense recovers',
+    run: 'QB scrambles', handoff: 'Handoff', out_of_bounds: 'Out of bounds', tackle: 'Tackle',
+    first_contact: 'First contact', qb_spike: 'Spike', lateral: 'Lateral',
+  };
+  const END_PHASE = {
+    pass_forward: 'Ball in the air', autoevent_passforward: 'Ball in the air',
+    qb_sack: 'QB sacked', qb_strip_sack: 'Strip sack', run: 'QB scrambling',
+  };
+  const BLOCK_TYPES = {
+    PP: 'pass protection', SW: 'switch block', CH: 'chip block', CL: 'second-level block', NB: 'no block',
+    PA: 'play-action protection', PR: 'pocket roll', PT: 'post block', PU: 'backfield pickup',
+    SR: 'set & release', UP: 'pull protection', BH: 'backfield help',
+  };
+
+  const PROB_FILE = 'live_probabilities.csv';
+  const PROB_H = 150; // probability chart height (CSS px)
+
+  // ---------- Helpers ----------
+  const $ = (id) => document.getElementById(id);
+  const clean = (v) => (v === undefined || v === 'NA' || v === 'None') ? '' : v;
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const yes = (v) => Number(v) === 1;
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ordinal = (d) => ({ 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' }[d] || d);
+  const eventLabel = (ev) => EVENT_LABELS[ev] || ev;
+  const resultInfo = (r) => RESULT_INFO[r] || [r || 'Unknown', '#8b949e'];
+
+  /** RFC-4180 style CSV parser (handles quoted fields, escaped quotes, CRLF). Returns array of string arrays. */
+  function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, '');
+    const rows = [];
+    let row = [];
+    let i = 0;
+    const n = text.length;
+    while (i < n) {
+      if (text.charCodeAt(i) === 34) { // opening quote
+        let j = i + 1, val = '';
+        for (;;) {
+          const k = text.indexOf('"', j);
+          if (k === -1) { val += text.slice(j); i = n; break; }
+          val += text.slice(j, k);
+          if (text.charCodeAt(k + 1) === 34) { val += '"'; j = k + 2; } else { i = k + 1; break; }
+        }
+        row.push(val);
+        const c = text.charCodeAt(i);
+        if (c === 44) { i++; if (i >= n) row.push(''); }
+        else if (c === 13 || c === 10) { i += (c === 13 && text.charCodeAt(i + 1) === 10) ? 2 : 1; rows.push(row); row = []; }
+      } else {
+        let j = i;
+        while (j < n) { const d = text.charCodeAt(j); if (d === 44 || d === 10 || d === 13) break; j++; }
+        row.push(text.slice(i, j));
+        if (j >= n) { i = n; }
+        else {
+          const d = text.charCodeAt(j);
+          if (d === 44) { i = j + 1; if (i >= n) row.push(''); }
+          else { i = j + ((d === 13 && text.charCodeAt(j + 1) === 10) ? 2 : 1); rows.push(row); row = []; }
+        }
+      }
+    }
+    if (row.length) rows.push(row);
+    return rows;
+  }
+
+  function toObjects(text) {
+    const rows = parseCSV(text);
+    if (!rows.length) return [];
+    const header = rows[0].map((h) => h.trim());
+    const out = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.length === 1 && r[0] === '') continue;
+      const o = {};
+      for (let j = 0; j < header.length; j++) o[header[j]] = clean(r[j]);
+      out.push(o);
+    }
+    return out;
+  }
+
+  // ---------- Data sources ----------
+  function fileSource(files) {
+    const byName = new Map();
+    for (const f of files) byName.set(f.name, f);
+    return {
+      label: 'local folder',
+      async text(name) {
+        const f = byName.get(name);
+        if (!f) throw new Error(`Couldn't find ${name} in the selected folder`);
+        return f.text();
+      },
+    };
+  }
+
+  function httpSource() {
+    return {
+      label: 'web server',
+      async text(name) {
+        const path = name.startsWith('tracking_') ? `data/tracking/${name}`
+          : name === PROB_FILE ? `first_down_model/outputs/${name}` : `data/${name}`;
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+        return res.text();
+      },
+    };
+  }
+
+  // ---------- State ----------
+  const state = {
+    source: null, games: [], gameById: new Map(), playsByGame: new Map(), players: new Map(), pffByPlay: new Map(),
+    trackingCache: new Map(), tracking: new Map(),
+    game: null, gamePlays: [], plays: [], playIdx: -1, play: null,
+    frames: [], frameIdx: 0, rawDirection: 'right', flip: false,
+    snapFrame: null, endFrame: null, endEvent: '', los: null, firstDown: null,
+    pffRows: [], pffById: new Map(),
+    playing: false, lastTs: null, acc: 0, speed: 1,
+    mouse: null, scale: 0, autoNextTimer: null, loadToken: 0,
+    // live first-down model output
+    liveProb: null,       // Map "gameId-playId" -> { presnap, byFrame: Map(frameId -> p) }
+    probSeries: null,     // per frame index of the current play: p or null (outside the modeled window)
+    probFirstIdx: -1, probLastIdx: -1, probPresnap: null, probW: 0,
+  };
+
+  const canvas = $('field');
+  const ctx = canvas.getContext('2d');
+  const setStatus = (msg) => { $('status').textContent = msg; };
+  const playerName = (id) => state.players.get(id)?.displayName || `#${id}`;
+
+  // ---------- Loading ----------
+  async function loadCore(source) {
+    setStatus('Loading games, plays, players and PFF data…');
+    const names = ['games.csv', 'plays.csv', 'players.csv', 'pffScoutingData.csv'];
+    const [games, plays, players, pff] = await Promise.all(names.map((n) => source.text(n).then(toObjects)));
+
+    state.source = source;
+    state.trackingCache = new Map();
+    state.games = games.sort((a, b) => a.gameId.localeCompare(b.gameId));
+    state.gameById = new Map(games.map((g) => [g.gameId, g]));
+
+    state.playsByGame = new Map();
+    for (const p of plays) {
+      if (!state.playsByGame.has(p.gameId)) state.playsByGame.set(p.gameId, []);
+      state.playsByGame.get(p.gameId).push(p);
+    }
+    for (const list of state.playsByGame.values()) list.sort((a, b) => Number(a.playId) - Number(b.playId));
+
+    state.players = new Map(players.map((p) => [p.nflId, p]));
+
+    state.pffByPlay = new Map();
+    for (const r of pff) {
+      const key = `${r.gameId}-${r.playId}`;
+      if (!state.pffByPlay.has(key)) state.pffByPlay.set(key, []);
+      state.pffByPlay.get(key).push(r);
+    }
+
+    $('game-select').innerHTML = state.games.map((g) => {
+      const n = (state.playsByGame.get(g.gameId) || []).length;
+      return `<option value="${esc(g.gameId)}">Week ${esc(g.week)} · ${esc(g.visitorTeamAbbr)} @ ${esc(g.homeTeamAbbr)} · ${esc(g.gameDate)} (${n} plays)</option>`;
+    }).join('');
+
+    $('welcome').hidden = true;
+    $('app').hidden = false;
+    resizeCanvas();
+    renderStripLegend();
+    renderLegend();
+    setStatus(`Loaded ${games.length} games, ${plays.length.toLocaleString()} plays, ${players.length.toLocaleString()} players from ${source.label}.`);
+    // Pick up model output automatically if it's reachable (served over HTTP, or inside the chosen folder).
+    if (!state.liveProb) {
+      try { loadLiveProb(await source.text(PROB_FILE)); } catch { /* optional; use the button */ }
+    }
+    if (state.games.length) await selectGame(state.games[0].gameId);
+  }
+
+  /** Parse first_down_model/outputs/live_probabilities.csv. */
+  function loadLiveProb(text) {
+    const rows = parseCSV(text);
+    const h = rows[0].map((s) => s.trim());
+    const need = ['gameId', 'playId', 'frameId', 'p_live', 'p_presnap'];
+    const missing = need.filter((c) => !h.includes(c));
+    if (missing.length) throw new Error(`not a live-probability file (missing ${missing.join(', ')})`);
+    const [G, P, F, L, S] = need.map((c) => h.indexOf(c));
+
+    const map = new Map();
+    let n = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.length < h.length) continue;
+      const key = `${r[G]}-${r[P]}`;
+      let e = map.get(key);
+      if (!e) { e = { presnap: num(r[S]), byFrame: new Map() }; map.set(key, e); }
+      const p = num(r[L]);
+      if (p !== null) { e.byFrame.set(Number(r[F]), p); n++; }
+    }
+    state.liveProb = map;
+    $('open-prob').textContent = 'Live probabilities ✓';
+    setStatus(`Loaded live first-down probabilities for ${map.size.toLocaleString()} plays (${n.toLocaleString()} frames).`);
+    if (state.play) { setupProb(); renderInfo(); draw(); }
+  }
+
+  /** Align the model's per-frame probabilities with the current play's frames. */
+  function setupProb() {
+    state.probSeries = null; state.probFirstIdx = state.probLastIdx = -1; state.probPresnap = null;
+    const e = state.play && state.liveProb?.get(`${state.play.gameId}-${state.play.playId}`);
+    if (!e || !state.frames.length) return;
+    const series = state.frames.map((f) => (e.byFrame.has(f.frameId) ? e.byFrame.get(f.frameId) : null));
+    state.probFirstIdx = series.findIndex((p) => p !== null);
+    if (state.probFirstIdx < 0) return;
+    for (let i = series.length - 1; i >= 0; i--) if (series[i] !== null) { state.probLastIdx = i; break; }
+    state.probSeries = series;
+    state.probPresnap = e.presnap;
+  }
+
+  /** Probability to show at frame index i: live inside the modeled window, pre-snap before it, held after it. */
+  function probAt(i) {
+    const s = state.probSeries;
+    if (!s || !state.play || i < 0 || i >= s.length) return null;
+    if (s[i] !== null) return { p: s[i], phase: 'live' };
+    if (i < state.probFirstIdx) return { p: state.probPresnap, phase: 'pre' };
+    return { p: s[state.probLastIdx], phase: 'final' };
+  }
+
+  /** Same label definition as first_down_model/features.py. */
+  function actuallyConverted(p) {
+    const offense = p.passResult === 'C' || p.passResult === 'R';
+    const gained = Number(p.prePenaltyPlayResult) >= Number(p.yardsToGo);
+    return offense && (gained || /TOUCHDOWN/.test(p.playDescription || ''));
+  }
+
+  async function loadTracking(gameId) {
+    if (state.trackingCache.has(gameId)) return state.trackingCache.get(gameId);
+    const rows = parseCSV(await state.source.text(`tracking_${gameId}.csv`));
+    const h = rows[0].map((s) => s.trim());
+    const col = (name) => {
+      const i = h.indexOf(name);
+      if (i < 0) throw new Error(`tracking file is missing column "${name}"`);
+      return i;
+    };
+    const C = {
+      playId: col('playId'), nflId: col('nflId'), frameId: col('frameId'), team: col('team'),
+      jersey: col('jerseyNumber'), pdir: col('playDirection'), x: col('x'), y: col('y'),
+      s: col('s'), o: col('o'), dir: col('dir'), event: col('event'),
+    };
+
+    const byPlay = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.length < h.length) continue;
+      const pid = r[C.playId];
+      let play = byPlay.get(pid);
+      if (!play) { play = { direction: r[C.pdir], frameMap: new Map() }; byPlay.set(pid, play); }
+      const fid = Number(r[C.frameId]);
+      let fr = play.frameMap.get(fid);
+      if (!fr) { fr = { frameId: fid, event: '', ents: [] }; play.frameMap.set(fid, fr); }
+      const ev = clean(r[C.event]);
+      if (ev && !fr.event) fr.event = ev;
+      const jersey = clean(r[C.jersey]);
+      fr.ents.push({
+        nflId: clean(r[C.nflId]),
+        team: r[C.team],
+        jersey: jersey ? String(parseInt(jersey, 10)) : '',
+        x: Number(r[C.x]), y: Number(r[C.y]),
+        s: num(r[C.s]) ?? 0, o: num(r[C.o]), dir: num(r[C.dir]),
+      });
+    }
+
+    const out = new Map();
+    for (const [pid, play] of byPlay) {
+      out.set(pid, { direction: play.direction, frames: [...play.frameMap.values()].sort((a, b) => a.frameId - b.frameId) });
+    }
+    state.trackingCache.set(gameId, out);
+    if (state.trackingCache.size > 4) state.trackingCache.delete(state.trackingCache.keys().next().value);
+    return out;
+  }
+
+  // ---------- Game / play selection ----------
+  async function selectGame(gameId) {
+    stop();
+    clearTimeout(state.autoNextTimer);
+    const token = ++state.loadToken;
+    const g = state.gameById.get(gameId);
+    state.game = g;
+    state.play = null;
+    state.tracking = new Map(); // never show the previous game's tracking while this one loads
+    $('game-select').value = gameId;
+    state.gamePlays = state.playsByGame.get(gameId) || [];
+
+    $('team-filter').innerHTML = [
+      `<option value="all">Both teams</option>`,
+      `<option value="${esc(g.visitorTeamAbbr)}">${esc(g.visitorTeamAbbr)} (away)</option>`,
+      `<option value="${esc(g.homeTeamAbbr)}">${esc(g.homeTeamAbbr)} (home)</option>`,
+    ].join('');
+    $('result-filter').value = 'all';
+    renderGameSummary();
+
+    setStatus(`Loading tracking data for ${g.visitorTeamAbbr} @ ${g.homeTeamAbbr}…`);
+    let tracking;
+    try {
+      tracking = await loadTracking(gameId);
+    } catch (err) {
+      if (token !== state.loadToken) return;
+      tracking = new Map();
+      setStatus(`Tracking data unavailable for this game: ${err.message}`);
+    }
+    if (token !== state.loadToken) return; // user switched games while loading
+    state.tracking = tracking;
+    if (tracking.size) setStatus(`${g.visitorTeamAbbr} @ ${g.homeTeamAbbr}: ${state.gamePlays.length} plays, ${tracking.size} with tracking.`);
+    applyFilters();
+  }
+
+  function applyFilters() {
+    const team = $('team-filter').value;
+    const res = $('result-filter').value;
+    state.plays = state.gamePlays.filter((p) =>
+      (team === 'all' || p.possessionTeam === team) && (res === 'all' || p.passResult === res));
+    renderPlayList();
+    renderStrip();
+    if (state.plays.length) {
+      selectPlay(0);
+    } else {
+      stop();
+      state.play = null; state.playIdx = -1; state.frames = [];
+      $('info-panel').innerHTML = '<p>No plays match these filters.</p>';
+      $('events').innerHTML = ''; $('ticks').innerHTML = '';
+      updateFrameUI(); draw();
+    }
+  }
+
+  function selectPlay(i, { autoplay = false } = {}) {
+    clearTimeout(state.autoNextTimer);
+    stop();
+    const p = state.plays[i];
+    if (!p) return;
+    state.playIdx = i;
+    state.play = p;
+    const trk = state.tracking.get(p.playId);
+    state.frames = trk ? trk.frames : [];
+    state.rawDirection = trk ? trk.direction : 'right';
+    state.flip = $('opt-normalize').checked && state.rawDirection === 'left';
+    state.frameIdx = 0;
+    state.pffRows = state.pffByPlay.get(`${p.gameId}-${p.playId}`) || [];
+    state.pffById = new Map(state.pffRows.map((r) => [r.nflId, r]));
+
+    computeKeyFrames();
+    computeLines();
+    setupProb();
+    $('frame-slider').max = String(Math.max(0, state.frames.length - 1));
+    renderEvents();
+    renderInfo();
+    renderLegend();
+
+    document.querySelectorAll('.play-item.active, .slot.active').forEach((el) => el.classList.remove('active'));
+    const item = document.querySelector(`.play-item[data-index="${i}"]`);
+    if (item) { item.classList.add('active'); item.scrollIntoView({ block: 'nearest' }); }
+    document.querySelector(`.slot[data-index="${i}"]`)?.classList.add('active');
+
+    updateFrameUI();
+    draw();
+    if (autoplay) play();
+  }
+
+  function computeKeyFrames() {
+    const find = (names) => state.frames.find((f) => names.includes(f.event)) || null;
+    const snap = find(['ball_snap']) || find(['autoevent_ballsnap']);
+    const end = find(['pass_forward', 'qb_sack', 'qb_strip_sack', 'run']) || find(['autoevent_passforward']);
+    state.snapFrame = snap ? snap.frameId : (state.frames[0]?.frameId ?? null);
+    state.endFrame = end ? end.frameId : null;
+    state.endEvent = end ? end.event : '';
+  }
+
+  /** Line of scrimmage and first-down line in display coordinates. */
+  function computeLines() {
+    const p = state.play;
+    let los = num(p.absoluteYardlineNumber); // x of the line of scrimmage in raw tracking coordinates
+    if (los === null && state.frames.length) {
+      const ball = state.frames[0].ents.find((e) => e.team === 'football');
+      if (ball) los = ball.x;
+    }
+    if (los === null) { state.los = state.firstDown = null; return; }
+    const togo = num(p.yardsToGo) || 0;
+    let fd = los + (state.rawDirection === 'left' ? -togo : togo);
+    fd = Math.min(110, Math.max(10, fd));
+    if (state.flip) { los = FIELD_W - los; fd = FIELD_W - fd; }
+    state.los = los;
+    state.firstDown = fd;
+  }
+
+  // ---------- Rendering: panels ----------
+  function renderGameSummary() {
+    const g = state.game;
+    const html = [g.visitorTeamAbbr, g.homeTeamAbbr].map((team) => {
+      const ps = state.gamePlays.filter((p) => p.possessionTeam === team);
+      const count = (r) => ps.filter((p) => p.passResult === r).length;
+      const comp = count('C'), att = comp + count('I') + count('IN');
+      const pct = att ? Math.round((100 * comp) / att) : 0;
+      return `<span><strong>${esc(team)}</strong> ${ps.length} dropbacks · ${comp}/${att} passing (${pct}%) · ${count('S')} sacks · ${count('IN')} INT · ${count('R')} scrambles</span>`;
+    }).join('');
+    $('game-summary').innerHTML = html;
+  }
+
+  function renderStripLegend() {
+    $('strip-legend').innerHTML = Object.values(RESULT_INFO)
+      .map(([label, color]) => `<span><span class="sw" style="background:${color}"></span>${label}</span>`).join('')
+      + '<span>Bar height = yards gained (below the line = lost yards). Click a bar to view the play.</span>';
+  }
+
+  function renderStrip() {
+    let html = '';
+    let lastQ = null;
+    state.plays.forEach((p, i) => {
+      if (p.quarter !== lastQ) { html += `<span class="q-sep" aria-hidden="true">Q${esc(p.quarter)}</span>`; lastQ = p.quarter; }
+      const [label, color] = resultInfo(p.passResult);
+      const yds = num(p.playResult) ?? 0;
+      const style = yds >= 0
+        ? `bottom:18px;height:${Math.min(36, 2 + yds * 1.1)}px`
+        : `top:38px;height:${Math.min(16, 2 + Math.abs(yds) * 1.1)}px`;
+      const desc = `Q${p.quarter} ${p.gameClock}, ${p.possessionTeam} ${ordinal(p.down)} & ${p.yardsToGo}: ${label}, ${yds} yards`;
+      html += `<button class="slot" data-index="${i}" title="${esc(desc)}" aria-label="${esc(desc)}"><span class="bar" style="${style};background:${color}"></span></button>`;
+    });
+    $('strip').innerHTML = html;
+  }
+
+  function renderPlayList() {
+    $('play-count').textContent = `${state.plays.length} play${state.plays.length === 1 ? '' : 's'}`;
+    $('play-list').innerHTML = state.plays.map((p, i) => {
+      const [label, color] = resultInfo(p.passResult);
+      return `<li><button class="play-item" data-index="${i}">
+        <div class="pi-top"><span class="badge" style="background:${color}">${esc(label)}</span>Q${esc(p.quarter)} ${esc(p.gameClock)} · ${esc(ordinal(p.down))} &amp; ${esc(p.yardsToGo)} · <strong>${esc(p.possessionTeam)}</strong></div>
+        <div class="pi-desc">${esc(p.playDescription)}</div>
+      </button></li>`;
+    }).join('');
+  }
+
+  function renderEvents() {
+    const n = state.frames.length;
+    let ticks = '', chips = '';
+    state.frames.forEach((f, idx) => {
+      if (!f.event) return;
+      const left = n > 1 ? (idx / (n - 1)) * 100 : 0;
+      ticks += `<span class="tick" style="left:${left}%"></span>`;
+      const t = state.snapFrame !== null ? (f.frameId - state.snapFrame) / 10 : null;
+      const tLabel = t === null ? '' : ` · ${t >= 0 ? '+' : ''}${t.toFixed(1)}s`;
+      chips += `<button class="chip" data-index="${idx}" title="Jump to frame ${f.frameId}">${esc(eventLabel(f.event))}${tLabel}</button>`;
+    });
+    $('ticks').innerHTML = ticks;
+    $('events').innerHTML = chips || '<span class="hint">No tagged events for this play.</span>';
+  }
+
+  function pressureTypes(r) { return ['hit', 'hurry', 'sack'].filter((k) => yes(r?.[`pff_${k}`])); }
+  function allowedTypes(r) { return ['hit', 'hurry', 'sack'].filter((k) => yes(r?.[`pff_${k}Allowed`])); }
+
+  function renderInfo() {
+    const p = state.play, g = state.game;
+    const [label, color] = resultInfo(p.passResult);
+    const yardline = p.yardlineSide ? `${p.yardlineSide} ${p.yardlineNumber}` : `${p.yardlineNumber}`;
+    const roles = (role) => state.pffRows.filter((r) => r.pff_role === role).length;
+
+    let timing = '—';
+    if (state.snapFrame !== null && state.endFrame !== null) {
+      timing = `${((state.endFrame - state.snapFrame) / 10).toFixed(1)}s (snap → ${eventLabel(state.endEvent).toLowerCase()})`;
+    }
+
+    const pressure = state.pffRows.filter((r) => pressureTypes(r).length)
+      .map((r) => `${esc(playerName(r.nflId))} (${pressureTypes(r).join(', ')})`);
+    const allowed = state.pffRows.filter((r) => allowedTypes(r).length)
+      .map((r) => `${esc(playerName(r.nflId))} (${allowedTypes(r).join(', ')} allowed)`);
+    const fouls = [1, 2, 3].filter((k) => p[`foulName${k}`])
+      .map((k) => esc(p[`foulName${k}`]) + (p[`foulNFLId${k}`] ? ` — ${esc(playerName(p[`foulNFLId${k}`]))}` : ''));
+
+    $('info-panel').innerHTML = `
+      <h2><span class="badge" style="background:${color}">${esc(label)}</span>${esc(p.playResult)} yds</h2>
+      <p>${esc(p.playDescription)}</p>
+      <dl>
+        <dt>Situation</dt><dd>Q${esc(p.quarter)} ${esc(p.gameClock)} · ${esc(ordinal(p.down))} &amp; ${esc(p.yardsToGo)} at ${esc(yardline)}</dd>
+        <dt>Offense</dt><dd>${esc(p.possessionTeam)} vs ${esc(p.defensiveTeam)}</dd>
+        <dt>Score</dt><dd>${esc(g.visitorTeamAbbr)} ${esc(p.preSnapVisitorScore)} – ${esc(g.homeTeamAbbr)} ${esc(p.preSnapHomeScore)}</dd>
+        <dt>Formation</dt><dd>${esc(p.offenseFormation || '—')} · ${esc(p.personnelO || '—')}</dd>
+        <dt>Dropback</dt><dd>${esc(p.dropBackType || '—')}${yes(p.pff_playAction) ? ' · play-action' : ''}</dd>
+        <dt>Defense</dt><dd>${esc(p.personnelD || '—')} · ${esc(p.defendersInBox || '?')} in the box</dd>
+        <dt>Coverage</dt><dd>${esc(p.pff_passCoverage || '—')}${p.pff_passCoverageType ? ` (${esc(p.pff_passCoverageType)})` : ''}</dd>
+        <dt>Matchup</dt><dd>${roles('Pass Rush')} rushers vs ${roles('Pass Block')} blockers · ${roles('Pass Route')} receivers vs ${roles('Coverage')} in coverage</dd>
+        <dt>Time in pocket</dt><dd>${esc(timing)}</dd>
+        <dt>First-down odds</dt><dd>${probSummary()}</dd>
+        <dt>Pressure by</dt><dd>${pressure.join('<br>') || 'None credited'}</dd>
+        <dt>Allowed by</dt><dd>${allowed.join('<br>') || '—'}</dd>
+        <dt>Penalties</dt><dd>${fouls.join('<br>') || 'None'}</dd>
+      </dl>`;
+  }
+
+  const pct = (p) => `${Math.round(p * 100)}%`;
+  const pts = (d) => `${d >= 0 ? '+' : '−'}${Math.abs(Math.round(d * 100))} pts`;
+
+  function probSummary() {
+    if (!state.liveProb) return 'Load live probabilities to see the model';
+    if (!state.probSeries) return 'No model prediction (penalty-nullified play, 2-pt try, or no tracking)';
+    const snap = state.probSeries[state.probFirstIdx], end = state.probSeries[state.probLastIdx];
+    const d = end - snap;
+    const cls = d > 0.02 ? 'up' : d < -0.02 ? 'down' : 'flat';
+    const actual = actuallyConverted(state.play) ? 'converted ✓' : 'not converted ✗';
+    return `${pct(state.probPresnap)} pre-snap · ${pct(snap)} at snap → ${pct(end)} at end of pocket `
+      + `(<span class="${cls}">ΔP ${pts(d)}</span>)<br>Actual: ${actual}`;
+  }
+
+  // ---------- Probability chart ----------
+  function resizeProbChart() {
+    const c = $('prob-chart');
+    const w = $('prob-panel').clientWidth - 20; // minus panel padding
+    if (w <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    c.style.height = `${PROB_H}px`;
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(PROB_H * dpr);
+    c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+    state.probW = w;
+  }
+
+  const PROB_PAD = { l: 38, r: 12, t: 10, b: 22 };
+
+  function drawProbChart() {
+    const c = $('prob-chart'), g = c.getContext('2d');
+    const W = state.probW, H = PROB_H, P = PROB_PAD;
+    if (!W) return;
+    g.clearRect(0, 0, W, H);
+    const n = state.frames.length;
+    const px = (i) => P.l + (n > 1 ? i / (n - 1) : 0) * (W - P.l - P.r);
+    const py = (p) => P.t + (1 - p) * (H - P.t - P.b);
+
+    // axes + grid
+    g.font = '11px system-ui, sans-serif';
+    g.textBaseline = 'middle';
+    g.textAlign = 'right';
+    for (const p of [0, 0.25, 0.5, 0.75, 1]) {
+      g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(P.l, py(p)); g.lineTo(W - P.r, py(p)); g.stroke();
+      g.fillStyle = '#9aa7b4'; g.fillText(pct(p), P.l - 6, py(p));
+    }
+
+    if (!state.probSeries || !state.play || !n) {
+      g.textAlign = 'center';
+      g.fillStyle = '#9aa7b4';
+      g.font = '13px system-ui, sans-serif';
+      g.fillText(state.liveProb ? 'No model prediction for this play' : 'Click “Load live probabilities” (top) and pick first_down_model/outputs/live_probabilities.csv',
+        (P.l + W - P.r) / 2, H / 2);
+      return;
+    }
+
+    const s = state.probSeries, a = state.probFirstIdx, b = state.probLastIdx;
+
+    // modeled window (snap → end of pocket)
+    g.fillStyle = 'rgba(76,154,255,0.08)';
+    g.fillRect(px(a), P.t, px(b) - px(a), H - P.t - P.b);
+
+    // x labels: whole seconds after the snap
+    g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = '#9aa7b4';
+    const snapId = state.snapFrame ?? state.frames[a].frameId;
+    let lastX = -Infinity;
+    state.frames.forEach((f, i) => {
+      const dt = f.frameId - snapId;
+      if (dt % 10 !== 0) return;
+      const x = px(i);
+      if (x - lastX < 28) return;
+      g.fillText(dt === 0 ? 'snap' : `${dt > 0 ? '+' : ''}${dt / 10}s`, x, H - P.b + 6);
+      lastX = x;
+    });
+
+    // pre-snap estimate
+    if (state.probPresnap !== null) {
+      g.strokeStyle = '#9aa7b4'; g.lineWidth = 1; g.setLineDash([5, 4]);
+      g.beginPath(); g.moveTo(P.l, py(state.probPresnap)); g.lineTo(W - P.r, py(state.probPresnap)); g.stroke();
+      g.setLineDash([]);
+      g.textAlign = 'left'; g.textBaseline = 'bottom'; g.fillStyle = '#9aa7b4';
+      g.fillText('pre-snap', P.l + 4, py(state.probPresnap) - 2);
+    }
+
+    // live curve with area fill
+    g.beginPath();
+    g.moveTo(px(a), py(0));
+    for (let i = a; i <= b; i++) if (s[i] !== null) g.lineTo(px(i), py(s[i]));
+    g.lineTo(px(b), py(0));
+    g.closePath();
+    g.fillStyle = 'rgba(76,154,255,0.18)';
+    g.fill();
+    g.beginPath();
+    let started = false;
+    for (let i = a; i <= b; i++) {
+      if (s[i] === null) continue;
+      if (!started) { g.moveTo(px(i), py(s[i])); started = true; } else g.lineTo(px(i), py(s[i]));
+    }
+    g.strokeStyle = '#4c9aff'; g.lineWidth = 2.5; g.stroke();
+
+    // held value after the pocket phase
+    if (b < n - 1) {
+      g.strokeStyle = '#4c9aff'; g.lineWidth = 1.5; g.setLineDash([3, 3]);
+      g.beginPath(); g.moveTo(px(b), py(s[b])); g.lineTo(px(n - 1), py(s[b])); g.stroke();
+      g.setLineDash([]);
+    }
+
+    // end-of-pocket marker label
+    if (state.endEvent) {
+      g.textAlign = 'center'; g.textBaseline = 'bottom'; g.fillStyle = '#ffd666';
+      g.fillText(eventLabel(state.endEvent), px(b), P.t + 12);
+    }
+
+    // cursor
+    const cur = probAt(state.frameIdx);
+    const cx = px(state.frameIdx);
+    g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(cx, P.t); g.lineTo(cx, H - P.b); g.stroke();
+    if (cur && cur.p !== null) {
+      g.fillStyle = '#fff';
+      g.beginPath(); g.arc(cx, py(cur.p), 4.5, 0, Math.PI * 2); g.fill();
+    }
+  }
+
+  function updateProbReadout() {
+    const v = $('prob-value'), d = $('prob-delta'), note = $('prob-note');
+    const cur = probAt(state.frameIdx);
+    if (!cur || cur.p === null) {
+      v.textContent = '—'; d.textContent = ''; d.className = '';
+      note.textContent = state.liveProb ? 'No model prediction for this play.' : 'Model output not loaded.';
+      return;
+    }
+    v.textContent = pct(cur.p);
+    if (cur.phase === 'pre') {
+      d.textContent = ''; d.className = '';
+      note.textContent = 'Pre-snap estimate (situation only). The live model starts at the snap.';
+      return;
+    }
+    const delta = cur.p - state.probSeries[state.probFirstIdx];
+    d.textContent = `${delta >= 0 ? '▲' : '▼'} ${pts(delta)} since snap`;
+    d.className = delta > 0.02 ? 'up' : delta < -0.02 ? 'down' : 'flat';
+    note.textContent = cur.phase === 'live'
+      ? 'Live estimate from player positions and movement.'
+      : `Final estimate at "${eventLabel(state.endEvent).toLowerCase()}". Actual: ${actuallyConverted(state.play) ? 'converted ✓' : 'not converted ✗'}`;
+  }
+
+  function renderLegend() {
+    const mode = $('color-mode').value;
+    let items;
+    if (mode === 'role') {
+      items = Object.entries(ROLE_COLORS).map(([role, c]) => `<span><span class="sw" style="background:${c}"></span>${ROLE_LABELS[role]}</span>`);
+    } else {
+      const off = state.play?.possessionTeam || 'Offense', def = state.play?.defensiveTeam || 'Defense';
+      items = [
+        `<span><span class="sw" style="background:${TEAM_COLORS.offense}"></span>${esc(off)} (offense)</span>`,
+        `<span><span class="sw" style="background:${TEAM_COLORS.defense}"></span>${esc(def)} (defense)</span>`,
+      ];
+    }
+    items.push(
+      '<span><span class="sw" style="background:#8b5a2b"></span>Football</span>',
+      '<span><span class="sw line" style="background:#3b82f6"></span>Line of scrimmage</span>',
+      '<span><span class="sw line" style="background:#facc15"></span>First-down line</span>',
+      '<span><span class="sw ring"></span>Credited with QB pressure</span>',
+      '<span><span class="sw ring allowed"></span>Blocker who allowed pressure</span>',
+    );
+    $('legend').innerHTML = items.join('');
+  }
+
+  // ---------- Rendering: canvas ----------
+  const X = (x) => x * state.scale;
+  const Y = (y) => (FIELD_H - y) * state.scale;
+  /** NGS angles: 0° points toward +y, increasing clockwise (90° = +x). Returns canvas-space unit vector. */
+  const unit = (deg) => { const r = (deg * Math.PI) / 180; return [Math.sin(r), -Math.cos(r)]; };
+
+  function resizeCanvas() {
+    const w = $('canvas-wrap').clientWidth;
+    if (!w) return;
+    const h = (w * FIELD_H) / FIELD_W;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    state.scale = w / FIELD_W;
+    resizeProbChart();
+    draw();
+  }
+
+  function normalizeEnt(e) {
+    if (!state.flip) return e;
+    return {
+      ...e,
+      x: FIELD_W - e.x,
+      y: FIELD_H - e.y,
+      o: e.o === null ? null : (e.o + 180) % 360,
+      dir: e.dir === null ? null : (e.dir + 180) % 360,
+    };
+  }
+
+  function drawField() {
+    const s = state.scale, H = FIELD_H * s;
+    for (let x = 10; x < 110; x += 5) {
+      ctx.fillStyle = ((x - 10) / 5) % 2 ? '#2f7d33' : '#2a7330';
+      ctx.fillRect(X(x), 0, 5 * s + 0.5, H);
+    }
+    ctx.fillStyle = '#1f5a25';
+    ctx.fillRect(0, 0, 10 * s, H);
+    ctx.fillRect(X(110), 0, 10 * s, H);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    for (let x = 10; x <= 110; x += 5) {
+      ctx.lineWidth = x % 10 === 0 ? 1.6 : 0.8;
+      ctx.beginPath(); ctx.moveTo(X(x), 0); ctx.lineTo(X(x), H); ctx.stroke();
+    }
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    for (let x = 11; x < 110; x++) {
+      if (x % 5 === 0) continue;
+      for (const hy of HASH_Y) { ctx.moveTo(X(x), Y(hy - 0.35)); ctx.lineTo(X(x), Y(hy + 0.35)); }
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = `bold ${Math.max(10, 2.2 * s)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let k = 1; k <= 9; k++) {
+      const label = String((k <= 5 ? k : 10 - k) * 10);
+      ctx.fillText(label, X(10 + 10 * k), Y(12));
+      ctx.fillText(label, X(10 + 10 * k), Y(FIELD_H - 12));
+    }
+
+    // End zone labels: show which end zone the offense is attacking.
+    const dirEff = state.flip ? 'right' : state.rawDirection;
+    const team = state.play?.possessionTeam;
+    const zones = [[5, dirEff === 'left'], [115, dirEff === 'right']];
+    ctx.font = `bold ${Math.max(9, 2.2 * s)}px system-ui, sans-serif`;
+    for (const [zx, isTarget] of zones) {
+      ctx.save();
+      ctx.translate(X(zx), Y(FIELD_H / 2));
+      ctx.rotate(zx > 60 ? Math.PI / 2 : -Math.PI / 2);
+      ctx.fillStyle = isTarget && team ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)';
+      ctx.fillText(isTarget && team ? `${team} ATTACKING THIS WAY` : 'END ZONE', 0, 0);
+      ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, FIELD_W * s - 2, H - 2);
+  }
+
+  function drawLines() {
+    const H = FIELD_H * state.scale;
+    const line = (x, color) => {
+      if (x === null) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(X(x), 0); ctx.lineTo(X(x), H); ctx.stroke();
+    };
+    line(state.los, '#3b82f6');
+    line(state.firstDown, '#facc15');
+  }
+
+  function colorFor(e) {
+    if ($('color-mode').value === 'team') return e.team === state.play.possessionTeam ? TEAM_COLORS.offense : TEAM_COLORS.defense;
+    return ROLE_COLORS[state.pffById.get(e.nflId)?.pff_role] || UNKNOWN_COLOR;
+  }
+
+  function drawPlayers(ents, hover) {
+    const s = state.scale;
+    const r = Math.max(5, 0.95 * s);
+    const people = ents.filter((e) => e.team !== 'football');
+    const ball = ents.find((e) => e.team === 'football');
+
+    if ($('opt-blocks').checked) {
+      const pos = new Map(people.map((e) => [e.nflId, e]));
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      for (const row of state.pffRows) {
+        if (!row.pff_nflIdBlockedPlayer) continue;
+        const a = pos.get(row.nflId), b = pos.get(row.pff_nflIdBlockedPlayer);
+        if (a && b) { ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if ($('opt-vel').checked) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.5;
+      for (const e of people) {
+        if (e.dir === null || e.s < 0.3) continue;
+        const [ux, uy] = unit(e.dir);
+        const len = e.s * 0.6 * s; // ~0.6 s of travel
+        const cx = X(e.x), cy = Y(e.y), ex = cx + ux * len, ey = cy + uy * len;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+        const head = Math.min(6, len * 0.4), ang = Math.atan2(uy, ux);
+        ctx.lineTo(ex - head * Math.cos(ang - 0.5), ey - head * Math.sin(ang - 0.5));
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - head * Math.cos(ang + 0.5), ey - head * Math.sin(ang + 0.5));
+        ctx.stroke();
+      }
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.max(8, r * 1.05)}px system-ui, sans-serif`;
+    for (const e of people) {
+      const cx = X(e.x), cy = Y(e.y);
+      const pr = state.pffById.get(e.nflId);
+
+      ctx.fillStyle = colorFor(e);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      if (e.o !== null) {
+        const [ux, uy] = unit(e.o);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx + ux * r * 0.7, cy + uy * r * 0.7); ctx.lineTo(cx + ux * r * 1.5, cy + uy * r * 1.5); ctx.stroke();
+      }
+
+      if (pressureTypes(pr).length) {
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (allowedTypes(pr).length) {
+        ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 2.5; ctx.setLineDash([3, 2]);
+        ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (hover === e) {
+        ctx.strokeStyle = '#4c9aff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      const light = $('color-mode').value === 'role' && LIGHT_ROLES.has(pr?.pff_role);
+      ctx.fillStyle = light ? '#111' : '#fff';
+      ctx.fillText(e.jersey, cx, cy + 0.5);
+    }
+
+    if (ball) {
+      ctx.fillStyle = '#8b5a2b';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(X(ball.x), Y(ball.y), Math.max(4, 0.5 * s), Math.max(2.5, 0.3 * s), 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+  }
+
+  function phaseText(fr) {
+    const f = fr.frameId, snap = state.snapFrame, end = state.endFrame;
+    if (snap !== null && f < snap) return 'Pre-snap: offense lining up';
+    const t = snap !== null ? `${((f - snap) / 10).toFixed(1)}s after snap` : '';
+    if (end === null || f < end) return `Pocket phase · ${t}`;
+    return `${END_PHASE[state.endEvent] || 'After the throw'} · ${t}`;
+  }
+
+  function drawOverlay(fr) {
+    const lines = [phaseText(fr)];
+    const cur = probAt(state.frameIdx);
+    if (cur && cur.p !== null) lines.push(`First-down chance: ${pct(cur.p)}${cur.phase === 'pre' ? ' (pre-snap)' : ''}`);
+    for (let k = state.frameIdx; k >= 0 && k > state.frameIdx - 10; k--) {
+      if (state.frames[k].event) { lines.push(`● ${eventLabel(state.frames[k].event)}`); break; }
+    }
+    ctx.font = '600 13px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(8, 8, w, lines.length * 18 + 10);
+    lines.forEach((l, i) => {
+      ctx.fillStyle = i === 0 ? '#fff' : '#ffd666';
+      ctx.fillText(l, 16, 13 + i * 18);
+    });
+  }
+
+  function drawMessage(text) {
+    const W = FIELD_W * state.scale, H = FIELD_H * state.scale;
+    ctx.font = '600 16px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 30;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(W / 2 - w / 2, H / 2 - 20, w, 40);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, W / 2, H / 2);
+  }
+
+  function findHover(ents) {
+    if (!state.mouse) return null;
+    const fx = state.mouse.x / state.scale, fy = FIELD_H - state.mouse.y / state.scale;
+    let best = null, bestD = 1.6;
+    for (const e of ents) {
+      const d = Math.hypot(e.x - fx, e.y - fy);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  function updateTooltip(e) {
+    const tip = $('tooltip');
+    if (!e || !state.mouse) { tip.hidden = true; return; }
+    let lines;
+    if (e.team === 'football') {
+      lines = ['<strong>Football</strong>', `Speed: ${e.s.toFixed(1)} yd/s`];
+    } else {
+      const pl = state.players.get(e.nflId) || {};
+      const pr = state.pffById.get(e.nflId) || {};
+      lines = [
+        `<strong>#${esc(e.jersey)} ${esc(pl.displayName || 'Unknown player')}</strong>`,
+        `${esc(pl.officialPosition || '?')} · ${esc(e.team)}`,
+      ];
+      if (pr.pff_role) lines.push(`Role: ${esc(ROLE_LABELS[pr.pff_role] || pr.pff_role)}${pr.pff_positionLinedUp ? ` (lined up ${esc(pr.pff_positionLinedUp)})` : ''}`);
+      lines.push(`Speed: ${e.s.toFixed(1)} yd/s (${(e.s * 2.045).toFixed(1)} mph)`);
+      if (pr.pff_nflIdBlockedPlayer) {
+        const bt = pr.pff_blockType ? ` (${esc(BLOCK_TYPES[pr.pff_blockType] || pr.pff_blockType)})` : '';
+        lines.push(`Blocking: ${esc(playerName(pr.pff_nflIdBlockedPlayer))}${bt}`);
+      }
+      const pres = pressureTypes(pr);
+      if (pres.length) lines.push(`<span class="good">Credited with: ${pres.join(', ')}</span>`);
+      const allowed = allowedTypes(pr);
+      if (allowed.length) lines.push(`<span class="bad">Allowed: ${allowed.join(', ')}</span>`);
+    }
+    tip.innerHTML = lines.join('<br>');
+    tip.hidden = false;
+    const wrapW = $('canvas-wrap').clientWidth;
+    let left = state.mouse.x + 14;
+    if (left + 270 > wrapW) left = Math.max(0, state.mouse.x - 284);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${state.mouse.y + 14}px`;
+  }
+
+  function draw() {
+    if (!state.scale) return;
+    drawProbChart();
+    updateProbReadout();
+    ctx.clearRect(0, 0, FIELD_W * state.scale, FIELD_H * state.scale);
+    drawField();
+    if (!state.play) { drawMessage('Select a play'); updateTooltip(null); return; }
+    drawLines();
+    const fr = state.frames[state.frameIdx];
+    if (!fr) { drawMessage('No tracking data for this play'); updateTooltip(null); return; }
+    const ents = fr.ents.map(normalizeEnt);
+    const hover = findHover(ents);
+    drawPlayers(ents, hover);
+    drawOverlay(fr);
+    updateTooltip(hover);
+  }
+
+  // ---------- Playback ----------
+  function updateFrameUI() {
+    const slider = $('frame-slider');
+    slider.value = String(state.frameIdx);
+    const fr = state.frames[state.frameIdx];
+    $('frame-label').textContent = fr ? `Frame ${fr.frameId} / ${state.frames[state.frames.length - 1].frameId}` : 'No frames';
+  }
+
+  function updatePlayBtn() {
+    const b = $('play-btn');
+    b.textContent = state.playing ? '⏸' : '▶';
+    b.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
+  }
+
+  function setFrame(i) {
+    state.frameIdx = Math.max(0, Math.min(state.frames.length - 1, i));
+    updateFrameUI();
+    draw();
+  }
+
+  function play() {
+    if (state.playing || !state.frames.length) return;
+    clearTimeout(state.autoNextTimer);
+    if (state.frameIdx >= state.frames.length - 1) state.frameIdx = 0;
+    state.playing = true;
+    state.lastTs = null;
+    state.acc = 0;
+    updatePlayBtn();
+    requestAnimationFrame(tick);
+  }
+
+  function stop() {
+    state.playing = false;
+    updatePlayBtn();
+  }
+
+  function tick(ts) {
+    if (!state.playing) return;
+    if (state.lastTs === null) state.lastTs = ts;
+    state.acc += (ts - state.lastTs) * state.speed;
+    state.lastTs = ts;
+    let advanced = false;
+    while (state.acc >= 100) { // tracking is 10 Hz → one frame per 100 ms at 1×
+      state.acc -= 100;
+      if (state.frameIdx < state.frames.length - 1) { state.frameIdx++; advanced = true; }
+      else { state.playing = false; break; }
+    }
+    if (advanced) { updateFrameUI(); draw(); }
+    if (state.playing) { requestAnimationFrame(tick); return; }
+    updatePlayBtn();
+    if ($('opt-autonext').checked && state.playIdx < state.plays.length - 1) {
+      state.autoNextTimer = setTimeout(() => selectPlay(state.playIdx + 1, { autoplay: true }), 900);
+    }
+  }
+
+  // ---------- Events ----------
+  $('open-folder').addEventListener('click', () => $('folder-input').click());
+  $('folder-input').addEventListener('change', (e) => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    loadCore(fileSource(files)).catch((err) => setStatus(`Error: ${err.message}`));
+  });
+
+  $('game-select').addEventListener('change', (e) => selectGame(e.target.value));
+  $('team-filter').addEventListener('change', applyFilters);
+  $('result-filter').addEventListener('change', applyFilters);
+
+  $('play-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('.play-item');
+    if (btn) selectPlay(Number(btn.dataset.index));
+  });
+  $('strip').addEventListener('click', (e) => {
+    const btn = e.target.closest('.slot');
+    if (btn) selectPlay(Number(btn.dataset.index));
+  });
+  $('events').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (chip) { stop(); setFrame(Number(chip.dataset.index)); }
+  });
+
+  $('play-btn').addEventListener('click', () => (state.playing ? stop() : play()));
+  $('prev-play').addEventListener('click', () => selectPlay(Math.max(0, state.playIdx - 1)));
+  $('next-play').addEventListener('click', () => selectPlay(Math.min(state.plays.length - 1, state.playIdx + 1)));
+  $('frame-slider').addEventListener('input', (e) => { stop(); setFrame(Number(e.target.value)); });
+  $('speed').addEventListener('change', (e) => { state.speed = Number(e.target.value); });
+
+  $('opt-normalize').addEventListener('change', () => {
+    if (!state.play) return;
+    state.flip = $('opt-normalize').checked && state.rawDirection === 'left';
+    computeLines();
+    draw();
+  });
+  $('opt-blocks').addEventListener('change', draw);
+  $('opt-vel').addEventListener('change', draw);
+  $('color-mode').addEventListener('change', () => { renderLegend(); draw(); });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    draw();
+  });
+  canvas.addEventListener('mouseleave', () => { state.mouse = null; draw(); });
+
+  $('open-prob').addEventListener('click', () => $('prob-input').click());
+  $('prob-input').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { loadLiveProb(await f.text()); } catch (err) { setStatus(`Couldn't load probabilities: ${err.message}`); }
+    e.target.value = '';
+  });
+  $('prob-chart').addEventListener('click', (e) => {
+    const n = state.frames.length;
+    if (!n || !state.probW) return;
+    const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    const frac = (x - PROB_PAD.l) / (state.probW - PROB_PAD.l - PROB_PAD.r);
+    stop();
+    setFrame(Math.round(Math.max(0, Math.min(1, frac)) * (n - 1)));
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if ($('app').hidden || !state.play) return;
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return; // let the focused button handle it
+    if (e.key === ' ') { e.preventDefault(); state.playing ? stop() : play(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); stop(); setFrame(state.frameIdx + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); stop(); setFrame(state.frameIdx - 1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); selectPlay(Math.min(state.plays.length - 1, state.playIdx + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); selectPlay(Math.max(0, state.playIdx - 1)); }
+  });
+
+  new ResizeObserver(resizeCanvas).observe($('canvas-wrap'));
+
+  // Auto-load when served over HTTP (e.g. `python3 -m http.server` from the project root).
+  if (location.protocol.startsWith('http')) {
+    loadCore(httpSource()).catch((err) => setStatus(`Couldn't auto-load from the server (${err.message}). Use "Open data folder".`));
+  }
+})();
+</script>
+</body>
+</html>
